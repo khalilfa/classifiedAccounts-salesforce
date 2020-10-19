@@ -20,13 +20,28 @@ const readFile = (fileName) => {
     }
 }
 
+const getCredentials = () => {
+    const credentialsFileName = 'meli_creds_admin.json';
+    try {
+        let data = fs.readFileSync(credentialsFileName);
+        let credentials = JSON.parse(data);
+
+        return credentials;
+    } catch (error) {
+        throw new Error('-- ERROR: No se pudo leer el archivo de credenciales: ' + credentialsFileName);
+    }
+}
+
 const app = () => {
     console.log('Inicia la APP');
     try {
         // READ FILE
         const fileName = getFileName();
         const accounts = readFile(fileName);
-        console.log('Size: ' + accounts.length);
+        console.log('Cantidad de cuentas: ' + accounts.length);
+
+        // API CONNECTION
+        const credentials = getCredentials();
 
     } catch (error) {
         console.error(error.message);
