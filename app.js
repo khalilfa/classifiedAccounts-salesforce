@@ -1,9 +1,22 @@
 const fs = require('fs');
+const path = require("path");
 const axios = require('axios');
+const moment = require('moment');
 
 const TOKEN_ENDPOINT = '/admin/oauth/token';
-const USERS_ENDPOINT = '/users/ALL/classifieds_accounts/search';
+const USERS_ENDPOINT = '/users';
 const MELI_ENDPOINT = "https://api.mercadolibre.com";
+
+const MAIN_DIR = '/data';
+const DATE_DIR = '/' + moment().format("DD-MM-YY");
+const ERROR_FILE_NAME = '/Errores.json';
+const DATA_FILE_NAME = '/Datos.json';
+const RESPONSE_FILE_NAME = '/Respuesta-API.json';
+const RESULT_FILE_NAME = '/Resultado.json';
+
+const OPTIONS = {
+    EXIST_RESULT_FILE: '-results'
+}
 
 // File operations
 const getFileName = () => {
@@ -26,13 +39,12 @@ const readFile = (fileName) => {
     }
 }
 
-const createFile = (fileName, data) => {
-    fs.writeFile(fileName, data, err => {
-        if (err) console.log('Error al guardar el archivo: ' + err);
-        console.log('El archivo se guardo con exito');
+const createFile = (filePath, data) => {
+    fs.writeFile(filePath, data, err => {
+        if (err) console.log('\n' + '-- Error al guardar el archivo "' + filePath + '" : ' + err);
+        console.log('\n' + 'El archivo "' + filePath + '" se guardo con exito');
     });
 }
-
 
 // API operations
 const getCredentials = () => {
@@ -43,7 +55,7 @@ const getCredentials = () => {
 
         return credentials;
     } catch (error) {
-        throw new Error('-- ERROR: No se pudo leer el archivo de credenciales: ' + credentialsFileName);
+        throw new Error('\n' + '-- ERROR: No se pudo leer el archivo de credenciales: ' + credentialsFileName);
     }
 }
 
@@ -56,56 +68,157 @@ const getToken = (credentials) => {
     return data;
 }
 
-const getAllAccounts = (token, accounts = [], offset = 0, limit = 0) => {
+const getAllAccountsFromAPI = (token, accountIds, limit = 20, offset = 0, gettedAccounts = []) => {
     const ENDPOINT = MELI_ENDPOINT + USERS_ENDPOINT;
+    const newOffset = offset + limit;
     const params = {
-        access_token: token.access_token,
-        user_type: 'car_dealer, franchise, real_estate_agency',
-        offset
+        access_token: token,
+        ids: accountIds.slice(offset, newOffset).toString()
     };
+
+    if(offset == 0) console.log('-- Cantidad de elementos recuperados de la API:  ');
 
     return axios.get(ENDPOINT, { params })
             .then(res => {
-                const accountsPage = res.data.results;
-                const newOffset = offset + res.data.paging.limit;
-                if(accountsPage.length == 0 || limit == 100){
-                    return accounts;
+                const newAccounts = res.data.map(elem => elem.body);
+
+                if((offset % 1000) == 0 && offset != 0) console.log('- ' + offset);
+
+                if(newAccounts.length < limit) {
+                    gettedAccounts.push(...newAccounts);
+
+                    console.log('- ' + gettedAccounts.length);
+                    
+                    return gettedAccounts;
                 } else {
-                    console.log('Se realiza una llamada con cantidad: ' + accountsPage.length);
-                    return getAllAccounts(token, accounts.concat(accountsPage), newOffset, newOffset);
+                    gettedAccounts.push(...newAccounts);
+                    return getAllAccountsFromAPI(token, accountIds, limit, newOffset, gettedAccounts);
                 }
-                
             })
             .catch(err => console.log(err));
 }
 
+// Data transformation logic
+const createNewAccounts = (data) => {
+    const updatedAccounts = [];
+    data.forEach(account => {
+        try {
+            const allowedToList = account.status.list.allow && account.internal_tags.length == 0;
+            const allowedToSell = account.status.sell.allow && account.internal_tags.length == 0;
+            updatedAccounts.push({
+                Cust_Id__c: account.user_id,
+                Name: account.nickname,
+                Razon_Social__c: account.company.corporate_name,
+                N_de_CUIT__c: account.company.identification,
+                Pa_s__c: account.site_id,
+                BillingStreet: account.address.address,
+                BillingCity: account.address.city,
+                BillingPostalCode: account.address.zip_code,
+                BillingCountryCode: account.country_id,
+                BillingStateCode: ((account.address.state != null) && (account.address.state.indexOf('-') > 0)) ? account.address.state.substring(account.address.state.indexOf('-') + 1) : account.address.state,
+                Unique_Nickname__c: account.site_id+'_N-'+account.nickname+'-N',
+                Estado_del_Vendedor__c: account.status.site_status,
+                Identification_Type__c: account.identification.type,
+                Identification_Number__c: account.identification.number,
+                Immediate_Payment__c: account.status.immediate_payment == 'true',
+                User_Type__c: account.user_type,
+                Credit_Consumed__c: account.credit.consumed,
+                Credit_Level_Id__c: account.credit.credit_level_id,
+                Allowed_to_List__c: allowedToList,
+                Allowed_to_Sell__c: allowedToSell,
+                List_Error_Codes__c: allowedToList ? '' : [...account.status.list.codes, ...account.internal_tags].join(';'),
+                Sell_Error_Codes__c: allowedToSell ? '' : [...account.status.sell.codes, ...account.internal_tags].join(';'),
+                Tags__c: account.tags ? account.tags.join(';') : '',
+            });
+        } catch(err) {
+            console.log('-- Error al crear las cuentas: ' + err);
+        }
+        
+    });
+    return updatedAccounts;
+}
 
+getAllAccountIds = (accounts) => accounts.map(acc => acc.Cust_ID__c);
+
+// OPTIONS
+const getOptions = () => {
+    const options = process.argv.slice(2);
+    return options;
+}
+
+existResultFile = () => {
+    return getOptions().includes(OPTIONS.EXIST_RESULT_FILE);
+}
 
 // MAIN
 const app = () => {
-    console.log('Inicia la APP');
+    console.log('--- Inicia el script ---' + '\n');
     try {
-        // READ FILE
-        const fileName = getFileName();
-        const accounts = readFile(fileName);
-        console.log('Cantidad de cuentas: ' + accounts.length);
+        if(!existResultFile()) {
+            // Create a directories if they don't exist
+            const currentPath = path.join(__dirname, MAIN_DIR);
+            if (!fs.existsSync(currentPath)) fs.mkdirSync(currentPath);
+            if (!fs.existsSync(currentPath + DATE_DIR)) fs.mkdirSync(currentPath + DATE_DIR);
+            
+            // Move file to the correct directory. If there is a file, then move it
+            const originalFilePath = __dirname + '/' + getFileName();
+            const newFilePath = currentPath + DATE_DIR + DATA_FILE_NAME;
+            if (fs.existsSync(originalFilePath)) fs.renameSync(originalFilePath, newFilePath);
 
-        // API CONNECTION
-        let allAccounts = [];
-        const credentials = getCredentials();
-        const token = getToken(credentials);
-        token
-            .then(res => {
-                console.log(res);
-                getAllAccounts(token)
-                    .then(res => {
-                        console.log(res.length);
-                        const jsonContent = JSON.stringify(res);
-                        createFile('recuperados.json', jsonContent);
+            // READ FILE
+            const accounts = readFile(!fs.existsSync(originalFilePath) ? newFilePath : originalFilePath);
+            console.log('Cantidad de cuentas en el archivo "' + getFileName() + '": ' + accounts.length + '\n');
+
+            // API CONNECTION
+            const credentials = getCredentials();
+            const token = getToken(credentials);
+            token.then(res => {
+                const accountIds = getAllAccountIds(accounts);
+
+                getAllAccountsFromAPI(res.access_token, accountIds)
+                    .then(accs => {                    
+                        // Create a response file
+                        const responseFilePath = __dirname + MAIN_DIR + DATE_DIR + RESPONSE_FILE_NAME;
+                        const responseContent = JSON.stringify(accs);
+                        createFile(responseFilePath, responseContent);
+
+                        return accs;
                     })
-                    .catch(err => console.log('-- ERROR: No se pudo realizar la llamada multiple: ' + err));                
+                    .catch(err => console.log('\n' + '-- ERROR: No se pudo realizar la llamada multiple: ' + err))
+                    .then(accs => {
+                        // Transform data
+                        const newAccounts = createNewAccounts(accs);
+
+                        // CREATE OUTPUT FILE
+                        const resultFilePath = __dirname + MAIN_DIR + DATE_DIR + RESULT_FILE_NAME;
+                        const resultContent = JSON.stringify(newAccounts);
+                        createFile(resultFilePath, resultContent);
+                    })
+                    .catch(err => console.log('\n' + '-- ERROR: No se pudo realizar transformar la data recuperada: ' + err))
+                    .then(() => {
+                        // END
+                        setTimeout(function(){ console.log('\n' + '-- Finalizo la ejecucion --' + '\n'); }, 1000);
+                    });
             })
             .catch(err => console.error(err));
+        } else {
+            // Read today response file
+            const responseFileName = __dirname + MAIN_DIR + DATE_DIR + RESPONSE_FILE_NAME;
+            const accs = readFile(responseFileName);
+            console.log('Cantidad de cuentas en el archivo "' + responseFileName + '": ' + accs.length + '\n');
+
+            // Transform data
+            const newAccounts = createNewAccounts(accs);
+
+            // Modify result file
+            const resultFileName = __dirname + MAIN_DIR + DATE_DIR + RESULT_FILE_NAME;
+            const resultContent = JSON.stringify(newAccounts);
+            createFile(resultFileName, resultContent);
+
+            // END
+            setTimeout(function(){ console.log('\n' + '-- Finalizo la ejecucion --' + '\n'); }, 1000);
+        }
+        
 
     } catch (error) {
         console.error(error.message);
