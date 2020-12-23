@@ -1,0 +1,24 @@
+{
+  "name": "classifiedaccounts-salesforce",
+  "version": "1.0.0",
+  "description": "Recupera cuentas desde la API de meli",
+  "main": "app.js",
+  "dependencies": {
+    "axios": "^0.20.0",
+    "moment": "^2.29.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/khalilfa/classifiedAccounts-salesforce.git"
+  },
+  "author": "Facundo Khalil Videla Yanzon",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/khalilfa/classifiedAccounts-salesforce/issues"
+  },
+  "homepage": "https://github.com/khalilfa/classifiedAccounts-salesforce#readme"
+}
