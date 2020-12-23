@@ -98,6 +98,23 @@ const getAllAccountsFromAPI = (token, accountIds, limit = 20, offset = 0, getted
             .catch(err => console.log(err));
 }
 
+const getAllAccountsOneByOneFromAPI = (token, accountIds, limit = 1, offset = 0, gettedAccounts = []) => {
+    // const ENDPOINT = MELI_ENDPOINT + USERS_ENDPOINT + '/' + accountIds.pop();
+    const newOffset = offset + limit;
+    const params = {
+        access_token: token,
+    };
+
+    if(offset == 0) console.log('-- Cantidad de elementos recuperados de la API:  ');
+
+    return  Promise.all(accountIds.map(acc => {
+                const ENDPOINT = MELI_ENDPOINT + USERS_ENDPOINT + '/' + acc;
+                return axios.get(ENDPOINT, { params })
+                            .then(res => res.data)
+                            .catch(err => console.error('-- Error al recuperar una cuenta: ' + err));
+            }));
+}
+
 // Data transformation logic
 const createNewAccounts = (data) => {
     const updatedAccounts = [];
@@ -106,7 +123,7 @@ const createNewAccounts = (data) => {
             const allowedToList = account.status.list.allow && account.internal_tags.length == 0;
             const allowedToSell = account.status.sell.allow && account.internal_tags.length == 0;
             updatedAccounts.push({
-                Cust_Id__c: account.user_id,
+                Cust_Id__c: account.id,
                 Name: account.nickname,
                 Razon_Social__c: account.company.corporate_name,
                 N_de_CUIT__c: account.company.identification,
@@ -175,7 +192,7 @@ const app = () => {
             token.then(res => {
                 const accountIds = getAllAccountIds(accounts);
 
-                getAllAccountsFromAPI(res.access_token, accountIds)
+                getAllAccountsOneByOneFromAPI(res.access_token, accountIds)
                     .then(accs => {                    
                         // Create a response file
                         const responseFilePath = __dirname + MAIN_DIR + DATE_DIR + RESPONSE_FILE_NAME;
