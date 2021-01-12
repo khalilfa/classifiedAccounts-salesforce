@@ -18,6 +18,7 @@ const OPTIONS = {
     EXIST_RESULT_FILE: '-results'
 }
 
+
 // File operations
 const getFileName = () => {
     if (process.argv[2]) {
@@ -68,51 +69,30 @@ const getToken = (credentials) => {
     return data;
 }
 
-const getAllAccountsFromAPI = (token, accountIds, limit = 20, offset = 0, gettedAccounts = []) => {
+
+const getAllAccounts20Async = (token, accountIds, limit = 1, offset = 0, gettedAccounts = []) => {
     const ENDPOINT = MELI_ENDPOINT + USERS_ENDPOINT;
-    const newOffset = offset + limit;
-    const params = {
-        access_token: token,
-        ids: accountIds.slice(offset, newOffset).toString()
-    };
 
-    if(offset == 0) console.log('-- Cantidad de elementos recuperados de la API:  ');
+    const sublists = sliceList(accountIds);
 
-    return axios.get(ENDPOINT, { params })
-            .then(res => {
-                const newAccounts = res.data.map(elem => elem.body);
-
-                if((offset % 1000) == 0 && offset != 0) console.log('- ' + offset);
-
-                if(newAccounts.length < limit) {
-                    gettedAccounts.push(...newAccounts);
-
-                    console.log('- ' + gettedAccounts.length);
-                    
-                    return gettedAccounts;
-                } else {
-                    gettedAccounts.push(...newAccounts);
-                    return getAllAccountsFromAPI(token, accountIds, limit, newOffset, gettedAccounts);
-                }
-            })
-            .catch(err => console.log(err));
+    return Promise.all(sublists.map(sublist => {
+        return axios.get(ENDPOINT, { params: { access_token: token, ids: sublist.toString() } })
+                    .then(res => res.data.map(elem => elem.body))
+                    .catch(err => console.error('-- Error al recuperar una cuenta: ' + err));
+    }));
 }
 
-const getAllAccountsOneByOneFromAPI = (token, accountIds, limit = 1, offset = 0, gettedAccounts = []) => {
-    // const ENDPOINT = MELI_ENDPOINT + USERS_ENDPOINT + '/' + accountIds.pop();
-    const newOffset = offset + limit;
-    const params = {
-        access_token: token,
-    };
+const sliceList = (list) => {
+    let index = 0;
+    const result = [];
+    let slicedList;
+    while(index < list.length){
+        slicedList = list.slice(index, index + 20);
+        result.push(slicedList);
+        index = index + 20;
+    }
 
-    if(offset == 0) console.log('-- Cantidad de elementos recuperados de la API:  ');
-
-    return  Promise.all(accountIds.map(acc => {
-                const ENDPOINT = MELI_ENDPOINT + USERS_ENDPOINT + '/' + acc;
-                return axios.get(ENDPOINT, { params })
-                            .then(res => res.data)
-                            .catch(err => console.error('-- Error al recuperar una cuenta: ' + err));
-            }));
+    return result;
 }
 
 // Data transformation logic
@@ -192,8 +172,8 @@ const app = () => {
             token.then(res => {
                 const accountIds = getAllAccountIds(accounts);
 
-                getAllAccountsOneByOneFromAPI(res.access_token, accountIds)
-                    .then(accs => {                    
+                getAllAccounts20Async(res.access_token, accountIds)
+                    .then(accs => {        
                         // Create a response file
                         const responseFilePath = __dirname + MAIN_DIR + DATE_DIR + RESPONSE_FILE_NAME;
                         const responseContent = JSON.stringify(accs);
@@ -204,7 +184,8 @@ const app = () => {
                     .catch(err => console.log('\n' + '-- ERROR: No se pudo realizar la llamada multiple: ' + err))
                     .then(accs => {
                         // Transform data
-                        const newAccounts = createNewAccounts(accs);
+                        const allAccs = accs.flat();
+                        const newAccounts = createNewAccounts(allAccs);
 
                         // CREATE OUTPUT FILE
                         const resultFilePath = __dirname + MAIN_DIR + DATE_DIR + RESULT_FILE_NAME;
