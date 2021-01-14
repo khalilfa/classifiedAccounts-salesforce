@@ -69,6 +69,36 @@ const getToken = (credentials) => {
     return data;
 }
 
+const getAllAccountsFromAPI = (token, accountIds, limit = 20, offset = 0, gettedAccounts = []) => {
+    const ENDPOINT = MELI_ENDPOINT + USERS_ENDPOINT;
+    const newOffset = offset + limit;
+    const params = {
+        access_token: token,
+        ids: accountIds.slice(offset, newOffset).toString()
+    };
+
+    if(offset == 0) console.log('-- Cantidad de elementos recuperados de la API:  ');
+
+    return axios.get(ENDPOINT, { params })
+            .then(res => {
+                const newAccounts = res.data.map(elem => elem.body);
+
+                if((offset % 1000) == 0 && offset != 0) console.log('- ' + offset);
+
+                if(newAccounts.length < limit) {
+                    gettedAccounts.push(...newAccounts);
+
+                    console.log('- ' + gettedAccounts.length);
+                    
+                    return gettedAccounts;
+                } else {
+                    gettedAccounts.push(...newAccounts);
+                    return getAllAccountsFromAPI(token, accountIds, limit, newOffset, gettedAccounts);
+                }
+            })
+            .catch(err => console.log(err));
+}
+
 
 const getAllAccounts20Async = (token, accountIds, limit = 1, offset = 0, gettedAccounts = []) => {
     const ENDPOINT = MELI_ENDPOINT + USERS_ENDPOINT;
@@ -171,9 +201,10 @@ const app = () => {
             const token = getToken(credentials);
             token.then(res => {
                 const accountIds = getAllAccountIds(accounts);
-
-                getAllAccounts20Async(res.access_token, accountIds)
-                    .then(accs => {        
+                
+                let action = process.argv.includes('sync') ? getAllAccountsFromAPI : getAllAccounts20Async;
+                action(res.access_token, accountIds)
+                    .then(accs => {               
                         // Create a response file
                         const responseFilePath = __dirname + MAIN_DIR + DATE_DIR + RESPONSE_FILE_NAME;
                         const responseContent = JSON.stringify(accs);
@@ -184,8 +215,8 @@ const app = () => {
                     .catch(err => console.log('\n' + '-- ERROR: No se pudo realizar la llamada multiple: ' + err))
                     .then(accs => {
                         // Transform data
-                        const allAccs = accs.flat();
-                        const newAccounts = createNewAccounts(allAccs);
+                        let accsToProcess = process.argv.includes('sync') ? accs : accs.flat();
+                        const newAccounts = createNewAccounts(accsToProcess);
 
                         // CREATE OUTPUT FILE
                         const resultFilePath = __dirname + MAIN_DIR + DATE_DIR + RESULT_FILE_NAME;
